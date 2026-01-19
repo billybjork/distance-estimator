@@ -2,7 +2,7 @@
 End-to-end pipeline test.
 
 Extracts frames from a sample video, runs MASt3R and SAM2 on Modal,
-and verifies the outputs are usable.
+and performs full trick analysis.
 """
 
 import sys
@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from pipeline.frame_extractor import extract_frames_fast
+from pipeline.geometry import analyze_trick, TrickAnalysis
 
 
 def test_frame_extraction(video_path: str):
@@ -207,9 +208,53 @@ def main():
     # Step 3: Run MASt3R
     mast3r_result = test_mast3r(frame_bytes)
 
-    # Step 4: Visualize
+    # Step 4: Run full trick analysis
+    print("\n" + "=" * 60)
+    print("STEP 4: Trick Analysis")
+    print("=" * 60)
+
+    import numpy as np
+
+    timestamps = np.array(frames.get_timestamps())
+    frame_indices = np.array(frames.frame_indices)
+
+    analysis = analyze_trick(
+        masks=sam2_result["masks"],
+        pointmaps=mast3r_result["pointmaps"],
+        confidences=mast3r_result["confidences"],
+        timestamps=timestamps,
+        frame_indices=frame_indices,
+    )
+
+    print(f"  Trajectory: {len(analysis.trajectory_3d)} points")
+    print(f"  Ground plane: {analysis.ground_plane}")
+    print(f"  Board length (3D): {analysis.board_length_3d:.3f} units")
+    print(f"  Predicted trick segment: frames {analysis.predicted_in} to {analysis.predicted_out}")
+
+    # Compute metrics with default board length
+    metrics = analysis.compute_metrics(board_length_cm=155.0)
+    print("\n  === METRICS (assuming 155cm board) ===")
+    print(f"  Horizontal distance: {metrics['horizontal_m']:.2f} m")
+    print(f"  Arc length (3D):     {metrics['arc_length_m']:.2f} m")
+    print(f"  Peak height:         {metrics['peak_height_m']:.2f} m")
+    print(f"  Airtime:             {metrics['airtime_s']:.2f} s")
+    print(f"  Takeoff angle:       {metrics['takeoff_angle_deg']:.1f}°")
+    print(f"  Landing angle:       {metrics['landing_angle_deg']:.1f}°")
+
+    # Step 5: Visualize
     output_dir = Path(__file__).parent / "test_output"
     visualize_results(frames, sam2_result, mast3r_result, output_dir)
+
+    # Save analysis results
+    np.savez(
+        output_dir / "analysis.npz",
+        trajectory_3d=analysis.trajectory_3d,
+        heights=analysis.heights,
+        timestamps=analysis.timestamps,
+        frame_indices=analysis.frame_indices,
+        ground_plane=analysis.ground_plane,
+    )
+    print(f"\n  Saved analysis data to {output_dir / 'analysis.npz'}")
 
     print("\n" + "=" * 60)
     print("PIPELINE TEST COMPLETE")
