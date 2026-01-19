@@ -1,0 +1,6 @@
+# Local development dependencies (not Modal)
+numpy<2
+pillow
+scipy
+matplotlib
+modal
